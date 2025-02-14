@@ -1,0 +1,108 @@
+# App
+
+## Set up the Environment
+
+kind: Namespace
+apiVersion: v1
+metadata:
+  name: namespace-app-dev
+  labels:
+    name: namespace-app-dev
+
+---
+
+## Issues the SSL/TLS Certificate
+
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: certificate-app-dev
+  namespace: namespace-app-dev
+spec:
+  secretName: tls-secret-app-dev
+  issuerRef:
+    name: letsencrypt
+    kind: ClusterIssuer
+  dnsNames:
+  - domain.com
+  - www.domain.com
+  - api.domain.com
+
+### Up to 100 domains per certificate.
+
+---
+
+## Definition of the Application and its Replicas
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-app-dev
+  namespace: namespace-app-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-app-dev
+  template:
+    metadata:
+      labels:
+        app: nginx-app-dev
+    spec:
+      containers:
+      - name: nginx-app-dev
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        startupProbe:
+          httpGet:
+            path: /
+            port: 80
+          periodSeconds: 5
+          failureThreshold: 20
+
+---
+
+## Internal "L4 LB"
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service-app-dev
+  namespace: namespace-app-dev
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+  selector:
+    app: nginx-app-dev
+
+---
+
+## Internal "L7 LB"
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nginx-ingress-app-dev
+  namespace: namespace
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: "/"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - domain.com
+    secretName: tls-secret-app-dev
+  rules:
+  - host: domain.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: nginx-service-app-dev
+            port:
+              number: 80
